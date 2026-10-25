@@ -1,7 +1,7 @@
 import pandas as pd
 
 # 1. Cargar el archivo de cotizaciones
-df = pd.read_excel("../data/raw/cotizaciones.xlsx")
+df = pd.read_excel("data/raw/cotizaciones.xlsx")
 
 # 2. Calcular los puntajes según los pesos (60% Precio, 25% Plazo de Entrega, 15% Condiciones de Pago)
 max_precio = df['Precio'].max()
@@ -23,5 +23,5 @@ for producto in df['Producto'].unique():
     print(f"Producto: {ganador['Producto']} --> Proveedor recomendado: {ganador['Proveedor']} (Puntaje: {ganador['Score_Total']:.2f})")
 
 # 5. Guardar el resultado completo en la carpeta output
-df.to_excel("../output/resultado_cotizaciones.xlsx", index=False)
+df.to_excel("output/resultado_cotizaciones.xlsx", index=False)
 print("\n¡Archivo de resultados guardado con éxito en la carpeta output!")

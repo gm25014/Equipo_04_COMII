@@ -25,3 +25,81 @@ for producto in df['Producto'].unique():
 # 5. Guardar el resultado completo en la carpeta output
 df.to_excel("output/resultado_cotizaciones.xlsx", index=False)
 print("\n¡Archivo de resultados guardado con éxito en la carpeta output!")
+from collections import defaultdict
+from openpyxl import load_workbook
+from openpyxl.chart import BarChart, Reference
+
+
+def agregar_grafico_puntajes(ruta_archivo="output/resultado_cotizaciones.xlsx"):
+    libro = load_workbook(ruta_archivo)
+    hoja = libro.active
+
+    encabezados = {
+        str(celda.value).strip(): celda.column
+        for celda in hoja[1]
+        if celda.value is not None
+    }
+    if "Proveedor" not in encabezados or "Score_Total" not in encabezados:
+        raise ValueError("No se encontraron las columnas 'Proveedor' y 'Score_Total'.")
+
+    puntajes = defaultdict(lambda: [0.0, 0])
+    for fila in range(2, hoja.max_row + 1):
+        proveedor = hoja.cell(fila, encabezados["Proveedor"]).value
+        puntaje = hoja.cell(fila, encabezados["Score_Total"]).value
+
+        if proveedor is None or puntaje is None:
+            continue
+
+        nombre = str(proveedor).strip()
+        if not nombre:
+            continue
+        if not isinstance(puntaje, (int, float)):
+            raise ValueError(
+                f"Puntaje no numérico para el proveedor '{nombre}' en la fila {fila}."
+            )
+
+        puntajes[nombre][0] += puntaje
+        puntajes[nombre][1] += 1
+
+    if not puntajes:
+        raise ValueError("No hay puntajes por proveedor para graficar.")
+
+    columna_proveedor = 11
+    columna_puntaje = 12
+    hoja.cell(1, columna_proveedor, "Proveedor")
+    hoja.cell(1, columna_puntaje, "Puntaje promedio")
+
+    for fila, (proveedor, (total, cantidad)) in enumerate(puntajes.items(), start=2):
+        hoja.cell(fila, columna_proveedor, proveedor)
+        hoja.cell(fila, columna_puntaje, total / cantidad)
+
+    grafico = BarChart()
+    grafico.type = "bar"
+    grafico.style = 10
+    grafico.title = "Puntaje promedio por proveedor"
+    grafico.x_axis.title = "Puntaje promedio"
+    grafico.y_axis.title = "Proveedor"
+    grafico.y_axis.scaling.orientation = "maxMin"
+
+    datos = Reference(
+        hoja,
+        min_col=columna_puntaje,
+        min_row=1,
+        max_row=len(puntajes) + 1,
+    )
+    categorias = Reference(
+        hoja,
+        min_col=columna_proveedor,
+        min_row=2,
+        max_row=len(puntajes) + 1,
+    )
+    grafico.add_data(datos, titles_from_data=True)
+    grafico.set_categories(categorias)
+    grafico.height = 8
+    grafico.width = 16
+    hoja.add_chart(grafico, "N2")
+
+    libro.save(ruta_archivo)
+
+
+agregar_grafico_puntajes()

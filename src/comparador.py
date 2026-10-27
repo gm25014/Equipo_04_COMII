@@ -1,4 +1,10 @@
+from collections import defaultdict
 import pandas as pd
+from openpyxl import load_workbook
+from openpyxl.chart import BarChart, Reference
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 # 1. Cargar el archivo de cotizaciones
 df = pd.read_excel("data/raw/cotizaciones.xlsx")
@@ -25,9 +31,6 @@ for producto in df['Producto'].unique():
 # 5. Guardar el resultado completo en la carpeta output
 df.to_excel("output/resultado_cotizaciones.xlsx", index=False)
 print("\n¡Archivo de resultados guardado con éxito en la carpeta output!")
-from collections import defaultdict
-from openpyxl import load_workbook
-from openpyxl.chart import BarChart, Reference
 
 
 def agregar_grafico_puntajes(ruta_archivo="output/resultado_cotizaciones.xlsx"):
@@ -102,4 +105,33 @@ def agregar_grafico_puntajes(ruta_archivo="output/resultado_cotizaciones.xlsx"):
     libro.save(ruta_archivo)
 
 
+# Ejecutar la función del gráfico
 agregar_grafico_puntajes()
+
+
+def generar_pdf_top_proveedores(df_resultados):
+    """
+    Genera un archivo PDF con los 5 proveedores con mayor puntaje.
+    """
+    # Nota: Tu columna principal de puntaje se llama 'Score_Total' en este script
+    top_5 = df_resultados.sort_values(by="Score_Total", ascending=False).head(5)
+    
+    ruta_pdf = "output/top_5_proveedores.pdf"
+    doc = SimpleDocTemplate(ruta_pdf, pagesize=letter)
+    story = []
+    styles = getSampleStyleSheet()
+    
+    story.append(Paragraph("<b>Reporte Oficial: Top 5 Proveedores (Taller 3)</b>", styles['Title']))
+    story.append(Spacer(1, 15))
+    
+    for idx, row in top_5.iterrows():
+        texto = f"<b>Producto:</b> {row['Producto']} <br/><b>Proveedor Recomendado:</b> {row['Proveedor']} <br/><b>Puntaje Total:</b> {row['Score_Total']:.2f}"
+        story.append(Paragraph(texto, styles['Normal']))
+        story.append(Spacer(1, 10))
+        
+    doc.build(story)
+    print("¡Archivo PDF generado con éxito en la carpeta output/!")
+
+
+# Ejecutar la función del PDF al final de todo
+generar_pdf_top_proveedores(df)

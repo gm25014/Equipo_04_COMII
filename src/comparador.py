@@ -1,12 +1,15 @@
 from collections import defaultdict
 from pathlib import Path
-import os
 import sys
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+from zipfile import BadZipFile
 from xml.sax.saxutils import escape
 
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.chart import BarChart, Reference
+from openpyxl.utils.exceptions import InvalidFileException
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
@@ -23,16 +26,26 @@ COLUMNAS_REQUERIDAS = {
 
 def obtener_raiz_aplicacion():
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parents[2]
+        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[1]
 
 
 def obtener_archivo_inicial():
+    archivo_externo = (
+        obtener_raiz_aplicacion() / "data" / "raw" / "cotizaciones.xlsx"
+    )
+    if archivo_externo.is_file():
+        return archivo_externo
+
     if getattr(sys, "frozen", False):
         carpeta_temporal = getattr(sys, "_MEIPASS", None)
         if carpeta_temporal:
-            return Path(carpeta_temporal) / "data" / "raw" / "cotizaciones.xlsx"
-    return obtener_raiz_aplicacion() / "data" / "raw" / "cotizaciones.xlsx"
+            archivo_empaquetado = (
+                Path(carpeta_temporal) / "data" / "raw" / "cotizaciones.xlsx"
+            )
+            if archivo_empaquetado.is_file():
+                return archivo_empaquetado
+    return archivo_externo
 
 
 def calcular_puntajes(df):
@@ -165,10 +178,155 @@ def procesar_cotizaciones(ruta_entrada):
     return ruta_excel, ruta_pdf, df
 
 
+def iniciar_interfaz():
+    raiz = tk.Tk()
+    raiz.title("Comparador de cotizaciones")
+    raiz.minsize(720, 480)
+
+    contenedor = ttk.Frame(raiz, padding=20)
+    contenedor.pack(fill="both", expand=True)
+    contenedor.columnconfigure(0, weight=1)
+    contenedor.rowconfigure(4, weight=1)
+
+    ttk.Label(
+        contenedor,
+        text="Comparador de cotizaciones",
+        font=("Segoe UI", 18, "bold"),
+    ).grid(row=0, column=0, columnspan=2, sticky="w")
+    ttk.Label(
+        contenedor,
+        text="Selecciona un archivo Excel para calcular y comparar las cotizaciones.",
+    ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 16))
+
+    archivo_inicial = obtener_archivo_inicial()
+    ruta_archivo = tk.StringVar(
+        value=str(archivo_inicial) if archivo_inicial.is_file() else ""
+    )
+    ttk.Entry(contenedor, textvariable=ruta_archivo).grid(
+        row=2,
+        column=0,
+        sticky="ew",
+        padx=(0, 8),
+    )
+
+    def seleccionar_archivo():
+        seleccion = filedialog.askopenfilename(
+            title="Seleccionar archivo de cotizaciones",
+            initialdir=str(archivo_inicial.parent),
+            initialfile=archivo_inicial.name,
+            filetypes=[("Archivos de Excel", "*.xlsx"), ("Todos los archivos", "*.*")],
+        )
+        if seleccion:
+            ruta_archivo.set(seleccion)
+
+    ttk.Button(
+        contenedor,
+        text="Examinar...",
+        command=seleccionar_archivo,
+    ).grid(row=2, column=1, sticky="ew")
+
+    estado = tk.StringVar(value="Listo para procesar.")
+    etiqueta_estado = ttk.Label(contenedor, textvariable=estado)
+    etiqueta_estado.grid(row=3, column=0, columnspan=2, sticky="w", pady=12)
+
+    tabla = ttk.Treeview(
+        contenedor,
+        columns=("producto", "proveedor", "puntaje"),
+        show="headings",
+        height=8,
+    )
+    tabla.heading("producto", text="Producto")
+    tabla.heading("proveedor", text="Proveedor recomendado")
+    tabla.heading("puntaje", text="Puntaje")
+    tabla.column("producto", width=220)
+    tabla.column("proveedor", width=260)
+    tabla.column("puntaje", width=100, anchor="e")
+    tabla.grid(row=4, column=0, columnspan=2, sticky="nsew")
+    barra_desplazamiento = ttk.Scrollbar(
+        contenedor,
+        orient="vertical",
+        command=tabla.yview,
+    )
+    tabla.configure(yscrollcommand=barra_desplazamiento.set)
+    barra_desplazamiento.grid(row=4, column=2, sticky="ns")
+
+    salidas = tk.StringVar(value="")
+    ttk.Label(
+        contenedor,
+        textvariable=salidas,
+        justify="left",
+        wraplength=680,
+    ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(12, 4))
+
+    def procesar():
+        archivo = Path(ruta_archivo.get().strip())
+        if not archivo.is_file():
+            messagebox.showerror(
+                "Archivo no válido",
+                "Selecciona un archivo de cotizaciones existente en formato .xlsx.",
+                parent=raiz,
+            )
+            return
+        if archivo.suffix.lower() != ".xlsx":
+            messagebox.showerror(
+                "Formato no compatible",
+                "El archivo debe estar en formato .xlsx.",
+                parent=raiz,
+            )
+            return
+
+        for elemento in tabla.get_children():
+            tabla.delete(elemento)
+        salidas.set("")
+        boton_procesar.configure(state="disabled")
+        estado.set("Procesando cotizaciones...")
+        raiz.update_idletasks()
+        try:
+            ruta_excel, ruta_pdf, resultados = procesar_cotizaciones(archivo)
+        except (
+            BadZipFile,
+            ImportError,
+            InvalidFileException,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as error:
+            estado.set("No se pudo completar el procesamiento.")
+            messagebox.showerror(
+                "Error al procesar",
+                str(error),
+                parent=raiz,
+            )
+        else:
+            for elemento in tabla.get_children():
+                tabla.delete(elemento)
+            mejores = resultados.nlargest(5, "Score_Total")
+            for _, fila in mejores.iterrows():
+                tabla.insert(
+                    "",
+                    "end",
+                    values=(
+                        fila["Producto"],
+                        fila["Proveedor"],
+                        f"{fila['Score_Total']:.2f}",
+                    ),
+                )
+            estado.set("Proceso completado correctamente.")
+            salidas.set(
+                f"Excel: {ruta_excel}\nPDF: {ruta_pdf}"
+            )
+        finally:
+            boton_procesar.configure(state="normal")
+
+    boton_procesar = ttk.Button(
+        contenedor,
+        text="Procesar cotizaciones",
+        command=procesar,
+    )
+    boton_procesar.grid(row=6, column=0, sticky="w", pady=(12, 0))
+
+    raiz.mainloop()
+
+
 if __name__ == "__main__":
-    archivo_entrada = obtener_archivo_inicial()
-    print(f"Procesando archivo: {archivo_entrada}")
-    ruta_excel, ruta_pdf, _ = procesar_cotizaciones(archivo_entrada)
-    print("¡Proceso completado con éxito!")
-    print(f"Excel generado en: {ruta_excel}")
-    print(f"PDF generado en: {ruta_pdf}")
+    iniciar_interfaz()
